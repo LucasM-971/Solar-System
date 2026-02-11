@@ -1,0 +1,109 @@
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&display=swap');
+
+* {
+margin: 0;
+padding: 0;
+}
+html,
+body {
+overflow: hidden;
+}
+#webgl {
+position: absolute;
+top: 0;
+left: 0;
+outline: none;
+}
+
+#planet-info {
+    position: fixed;
+    top: 30px;
+    right: 30px;
+    width: 350px;
+    padding: 30px;
+    background: rgba(10, 5, 25, 0.85);
+    border-radius: 20px;
+    border: 2px solid rgba(0, 255, 255, 0.6);
+    font-family: 'Orbitron', sans-serif;
+    color: #00ffe0;
+    box-shadow: 0 0 20px #00ffe0, 0 0 50px #ff00ff33 inset;
+    backdrop-filter: blur(20px);
+    opacity: 0;
+    transform: translateX(120%);
+    pointer-events: none;
+    overflow: hidden;
+}
+
+#planet-info::before {
+    content: "";
+    position: absolute;
+    top: -50%;
+    left: -50%;
+    width: 200%;
+    height: 200%;
+    background: radial-gradient(circle, rgba(255, 0, 255, 0.15), transparent 70%);
+    animation: rotateBG 15s linear infinite;
+    z-index: 0;
+}
+
+@keyframes rotateBG {
+    0% {
+        transform: rotate(0deg);
+    }
+
+    100% {
+        transform: rotate(360deg);
+    }
+}
+
+#planet-info.visible {
+    opacity: 1;
+    transform: translateX(0);
+    transition: all 0.7s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+}
+
+#planet-info h2 {
+    position: relative;
+    z-index: 1;
+    margin: 0 0 15px 0;
+    font-size: 28px;
+    border-bottom: 2px solid #ff00ff;
+    padding-bottom: 12px;
+    text-shadow: 0 0 8px #ff00ff, 0 0 20px #ff00ff88;
+}
+
+#planet-info p {
+    position: relative;
+    z-index: 1;
+    margin: 10px 0;
+    font-size: 15px;
+    line-height: 1.5;
+    text-shadow: 0 0 5px #00ffe033, 0 0 15px #ff00ff22;
+}
+
+#planet-info .label {
+    color: #ff00ff;
+    font-weight: 700;
+}
+
+/* ligne horizontale animée style HUD */
+#planet-info .line {
+    position: absolute;
+    top: 50%;
+    left: -100%;
+    width: 200%;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, #00ffe0, transparent);
+    z-index: 0;
+    animation: lineMove 3s linear infinite;
+}
+
+@keyframes lineMove {
+    0% {
+        transform: translateX(-100%);
+    }
+
+    100% {
+        transform: translateX(100%);
+    }
+}
