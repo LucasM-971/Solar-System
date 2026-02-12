@@ -45,7 +45,7 @@ const venusTexture = textureLoader.load('/texture/4k_venus_atmosphere.jpg');
 const jupiterTexture = textureLoader.load('/texture/8k_jupiter.jpg');
 const marsTexture = textureLoader.load('/texture/8k_mars.jpg');
 const soleilTexture = textureLoader.load('/texture/8k_sun.jpg');
-const galaxyTexture = textureLoader.load('/texture/8k_stars.jpg');
+
 const moonTexture = textureLoader.load('/texture/8k_moon.jpg');
 
 
@@ -55,12 +55,8 @@ const lines = infoPanel.querySelectorAll('.line');
 
 
 const sphereGeometry = new THREE.SphereGeometry(60, 80, 80); 
-const sphereMateriale = new THREE.MeshBasicMaterial({
-  map: galaxyTexture,
-  side: THREE.BackSide 
-});
-const spheree = new THREE.Mesh(sphereGeometry, sphereMateriale);
-scene.add(spheree);
+
+
 
 const sphereMaterial = new THREE.MeshPhongMaterial({
   map: soleilTexture,
@@ -484,23 +480,23 @@ window.addEventListener('resize', () => {
 });
 
 function tick() {
-  mercureOrbit.rotation.y += 0.0002;
+  mercureOrbit.rotation.y += 0.002;
   mercure.rotation.y += 0.001;
 
-  venusOrbit.rotation.y += 0.00015;
+  venusOrbit.rotation.y += 0.0015;
   venus.rotation.y += 0.001;
 
-  terreOrbit.rotation.y += 0.0001;
+  terreOrbit.rotation.y += 0.001;
   terre.rotation.y += 0.001;
 
-  marsOrbit.rotation.y += 0.00008;
+  marsOrbit.rotation.y += 0.0008;
   mars.rotation.y += 0.001;
 
-  jupiterOrbit.rotation.y += 0.00004;
+  jupiterOrbit.rotation.y += 0.0004;
   jupiter.rotation.y += 0.001;
   
-  uranusOrbit.rotation.y += 0.00002;
-  neptuneOrbit.rotation.y += 0.00001;
+  uranusOrbit.rotation.y += 0.0002;
+  neptuneOrbit.rotation.y += 0.0001;
   luneOrbit.rotation.y += 0.0005;
 
   const sunDirection = new THREE.Vector3(0, 0, 0).sub(terre.position).normalize();
