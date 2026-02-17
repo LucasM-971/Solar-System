@@ -45,7 +45,7 @@ const venusTexture = textureLoader.load('/texture/4k_venus_atmosphere.jpg');
 const jupiterTexture = textureLoader.load('/texture/8k_jupiter.jpg');
 const marsTexture = textureLoader.load('/texture/8k_mars.jpg');
 const soleilTexture = textureLoader.load('/texture/8k_sun.jpg');
-
+const galaxyTexture = textureLoader.load('/texture/8k_stars.jpg');
 const moonTexture = textureLoader.load('/texture/8k_moon.jpg');
 
 
@@ -56,7 +56,13 @@ const lines = infoPanel.querySelectorAll('.line');
 
 const sphereGeometry = new THREE.SphereGeometry(60, 80, 80); 
 
+const galaxyMaterial = new THREE.MeshBasicMaterial({
+  map: galaxyTexture,
+  side: THREE.BackSide
+});
 
+const galaxy = new THREE.Mesh(sphereGeometry, galaxyMaterial);
+scene.add(galaxy);
 
 const sphereMaterial = new THREE.MeshPhongMaterial({
   map: soleilTexture,
