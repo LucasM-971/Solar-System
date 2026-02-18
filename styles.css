@@ -107,3 +107,20 @@ outline: none;
         transform: translateX(100%);
     }
 }
+
+@media screen and (max-width: 400px) {
+    #planet-info {
+        width: 90%;
+        right: 5%;
+        padding: 20px;
+    }
+
+    #planet-info h2 {
+        font-size: 22px;
+    }
+
+    #planet-info p {
+        font-size: 13px;
+    }
+    
+}
