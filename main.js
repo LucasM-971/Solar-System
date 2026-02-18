@@ -1,9 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 1. SCÈNE / RENDU
-// ─────────────────────────────────────────────────────────────────────────────
+
 const scene = new THREE.Scene();
 const sizes = { width: window.innerWidth, height: window.innerHeight };
 const canvas = document.getElementById('webgl');
@@ -29,9 +27,6 @@ controls.maxDistance = 80000;
 controls.target.set(0, 0, 0);
 controls.update();
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 2. TEXTURES — anisotropie maximale pour qualité 8K
-// ─────────────────────────────────────────────────────────────────────────────
 const TL = new THREE.TextureLoader();
 const MAX_ANISOTROPY = renderer.capabilities.getMaxAnisotropy();
 
@@ -42,12 +37,12 @@ function loadTex(path, srgb = false) {
   return t;
 }
 
-// Textures Terre 8K
+
 const earthDayTex    = loadTex('/texture/earth-texture.jpg',   true);
 const earthNightTex  = loadTex('/texture/8k_earth_nightmap.jpg', true);
 const earthCloudsTex = loadTex('/texture/8k_earth_clouds.jpg', false);
 earthCloudsTex.wrapS = THREE.RepeatWrapping;
-// Bump / specular optionnels (si présents dans /texture/)
+
 const earthBumpTex   = TL.load('/texture/8k_earth_normal_map.jpg');
 earthBumpTex.anisotropy = MAX_ANISOTROPY;
 
@@ -65,15 +60,12 @@ const tex = {
   stars   : loadTex('/texture/8k_stars.jpg',     true),
 };
 
-// Fond étoilé
 scene.add(new THREE.Mesh(
   new THREE.SphereGeometry(90000, 64, 64),
   new THREE.MeshBasicMaterial({ map: tex.stars, side: THREE.BackSide })
 ));
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 3. TERRE — shader jour/nuit
-// ─────────────────────────────────────────────────────────────────────────────
+
 const earthMat = new THREE.ShaderMaterial({
   uniforms: {
     dayMap   : { value: earthDayTex   },
@@ -123,9 +115,7 @@ const atmMat = new THREE.MeshStandardMaterial({
   depthWrite:  false,
   roughness:   1.0,
 });
-// ─────────────────────────────────────────────────────────────────────────────
-// 4. DONNÉES ORBITALES RÉELLES (J2000)
-// ─────────────────────────────────────────────────────────────────────────────
+
 function scaleDist(ua) {
   if (ua <= 1.6) return ua * 220.0;
   return 450.0 + (ua - 1.6) * 90.0;
@@ -155,23 +145,10 @@ const PLANETS_DATA = [
   { name:'Neptune', sma:30.07,  ecc:0.0097, period:164.798, rKm:24622, color:0x5c6bc0, texKey:'neptune', tilt:28.3,  M0:256.228, rotPeriod: 0.6713  },
 ];
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 5. SOLEIL — refait from scratch
-// Architecture :
-//   A) Sphère principale  : shader texture 8K + granulation procédurale
-//   B) Couronne interne   : sprite additif, taille ~1.6× le rayon
-//   C) Halo externe       : sprite additif très large et très transparent
-//   D) PointLight         : decay=2, intensité physique, shadow 8K
-//   E) AmbientLight       : très faible (côté nuit non noir absolu)
-// Tout le groupe soleil a toneMapped:false → aucune interférence ACES
-// ─────────────────────────────────────────────────────────────────────────────
 
-const SUN_R = 15; // rayon visuel
+const SUN_R = 15; 
 
-// ── A. Shader surface du Soleil ──────────────────────────────────────────────
-// Combine la texture 8K avec une granulation procédurale (cellules de convection)
-// et un effet de limbe (bords plus sombres = limb darkening réel).
-// toneMapped:false → les couleurs chaudes sont préservées exactement.
+
 const sunSurfaceMat = new THREE.ShaderMaterial({
   uniforms: {
     sunTex : { value: tex.sun  },
@@ -257,10 +234,7 @@ const sunMesh = new THREE.Mesh(
 sunMesh.name = 'soleil';
 scene.add(sunMesh);
 
-// ── B. Couronne interne (corona) ─────────────────────────────────────────────
-// Sprite additif légèrement plus grand que le Soleil.
-// Utilise un canvas généré procéduralement (dégradé radial orange→transparent)
-// pour ne pas dépendre d'une texture externe.
+
 function makeCoronaCanvas(size, innerColor, outerColor) {
   const c = document.createElement('canvas');
   c.width = c.height = size;
@@ -289,7 +263,7 @@ const coronaSprite = new THREE.Sprite(coronaMat);
 coronaSprite.scale.set(SUN_R * 3.2, SUN_R * 3.2, 1);
 scene.add(coronaSprite);
 
-// ── C. Halo externe (glow diffus) ────────────────────────────────────────────
+
 const haloTex = makeCoronaCanvas(512, 'rgba(255,160,30,0.25)', 'rgba(255,80,0,0)');
 const haloMat = new THREE.SpriteMaterial({
   map:        haloTex,
@@ -303,11 +277,8 @@ const haloSprite = new THREE.Sprite(haloMat);
 haloSprite.scale.set(SUN_R * 9.0, SUN_R * 9.0, 1);
 scene.add(haloSprite);
 
-// ── D. PointLight solaire ─────────────────────────────────────────────────────
-// decay = 2  → loi en 1/r² (physique).
-// intensity = 3×10⁶ calibrée pour que les planètes proches soient bien éclairées
-// et Neptune (~1600 u) reçoive encore un peu de lumière.
-// shadow.mapSize 4096 : bon compromis perf/qualité (8192 coûteux sur mobile).
+
+
 const sunLight = new THREE.PointLight(0xfff4e0, 2500, 0, 1);
 sunLight.castShadow = true;
 sunLight.shadow.mapSize.set(4096, 4096);
@@ -318,13 +289,8 @@ sunLight.shadow.normalBias    = 0.05;
 sunLight.position.set(0, 0, 0);
 scene.add(sunLight);
 
-// ── E. Lumière ambiante ───────────────────────────────────────────────────────
-// Très faible : évite le noir absolu côté nuit, simule la diffusion zodiacale
 scene.add(new THREE.AmbientLight(0x08111e, 0.18));
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 6. UTILITAIRES GÉOMÉTRIE KÉPLÉRIENNE
-// ─────────────────────────────────────────────────────────────────────────────
 function hexToRGB(hex) {
   return {
     r: ((hex >> 16) & 255) / 255,
@@ -364,9 +330,6 @@ function keplerPos(a, c, e, angle) {
   return new THREE.Vector3(r * Math.cos(angle) - c, 0, r * Math.sin(angle));
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 7. CRÉATION PLANÈTES + ORBITES
-// ─────────────────────────────────────────────────────────────────────────────
 const planetObjects = [];
 
 PLANETS_DATA.forEach(pd => {
@@ -430,12 +393,10 @@ PLANETS_DATA.forEach(pd => {
     });
   }
 
-  // Géométrie haute résolution pour la Terre (8K textures)
   const geoSegments = pd.name === 'Terre' ? 128 : 64;
   const mesh = new THREE.Mesh(new THREE.SphereGeometry(r, geoSegments, geoSegments), mat);
 
-  // La Terre : le shader gère son propre éclairage via NdotL
-  // → pas de shadow receiver/caster pour éviter les artefacts ShaderMaterial
+
   if (pd.name === 'Terre') {
     mesh.castShadow    = false;
     mesh.receiveShadow = false;
@@ -448,7 +409,6 @@ PLANETS_DATA.forEach(pd => {
   mesh.rotation.z = THREE.MathUtils.degToRad(pd.tilt);
   posGroup.add(mesh);
 
-  // ── Terre : nuages + atmosphère ──────────────────────────────────────────
   let earthCloudMesh = null;
   if (pd.name === 'Terre') {
     // MESH B : nuages (r * 1.007 = légèrement au-dessus)
@@ -524,9 +484,7 @@ PLANETS_DATA.forEach(pd => {
   });
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 8. LUNE
-// ─────────────────────────────────────────────────────────────────────────────
+
 const moonR    = scaleRadius(1737);
 const moonMesh = new THREE.Mesh(
   new THREE.SphereGeometry(moonR, 64, 64),
@@ -544,9 +502,7 @@ scene.add(moonMesh);
 let moonAngle = initialAngle(134.963, 27.32);
 const MOON_DIST = scaleRadius(6371) * 8;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 9. CSS / OVERLAY LABELS NEON
-// ─────────────────────────────────────────────────────────────────────────────
+
 const style = document.createElement('style');
 style.textContent = `
   @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&display=swap');
@@ -634,9 +590,7 @@ const labels = planetObjects.map(obj => ({
 const moonLabel = createLabel('Lune',   0xcccccc, null);
 const sunLabel  = createLabel('Soleil', 0xffee88, null);
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 10. PROJECTION 3D → ÉCRAN
-// ─────────────────────────────────────────────────────────────────────────────
+
 const _projVec = new THREE.Vector3();
 function projectToScreen(mesh) {
   mesh.getWorldPosition(_projVec);
@@ -655,9 +609,6 @@ function updateLabel(el, mesh, vOffset = 0) {
   el.style.top  = (y - vOffset) + 'px';
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 11. PANNEAU INFOS PLANÈTES
-// ─────────────────────────────────────────────────────────────────────────────
 const planetData = {
   soleil:  { name:'Soleil',   type:'Étoile',             diameter:'1 392 700 km', distance:'Centre du système',  period:'N/A',       description:'Le Soleil contient 99,86 % de la masse totale du système solaire.' },
   mercure: { name:'Mercure',  type:'Planète tellurique', diameter:'4 879 km',     distance:'57,9 M km',          period:'88 j',      description:'La plus petite, criblée de cratères, sans atmosphère significative.' },
@@ -683,9 +634,7 @@ function showInfo(key) {
 }
 function hideInfo() { document.getElementById('planet-info').classList.remove('visible'); }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 12. BOUTON RETOUR
-// ─────────────────────────────────────────────────────────────────────────────
+
 const backBtn = document.createElement('button');
 backBtn.textContent = '← Retour';
 backBtn.style.cssText = `
@@ -718,9 +667,7 @@ function hideBackBtn() {
   backBtn.style.opacity = '0'; backBtn.style.pointerEvents = 'none'; backBtn.style.transform = 'translateY(-6px)';
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 13. FOCUS / RESET
-// ─────────────────────────────────────────────────────────────────────────────
+
 let focusedMesh    = null;
 let isAnimating    = false;
 let lockedDistance = 0;
@@ -787,9 +734,6 @@ function resetView() {
   })();
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 14. RAYCASTING
-// ─────────────────────────────────────────────────────────────────────────────
 const raycaster = new THREE.Raycaster();
 const mouse     = new THREE.Vector2();
 const clickable = [sunMesh, moonMesh, ...planetObjects.map(p => p.mesh)];
@@ -810,9 +754,7 @@ window.addEventListener('resize', () => {
   renderer.setSize(sizes.width, sizes.height);
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 15. BOUCLE PRINCIPALE
-// ─────────────────────────────────────────────────────────────────────────────
+
 const SIM_DAYS_PER_SEC    = 0.5;
 const EARTH_PERIOD_DAYS   = 365.25;
 const HOVER_SPEED         = 0.07;
@@ -869,7 +811,7 @@ function tick() {
       cb + (1 - cb) * ht * 0.6
     );
 
-    // ── Trail animé ──
+
     obj.trailT = (obj.trailT + TRAIL_SPEED_PER_SEC * dt) % 1;
     obj.trailLine.material.opacity = ht;
     obj.headMesh.material.opacity  = ht;
@@ -893,7 +835,6 @@ function tick() {
     }
   });
 
-  // ══ Lune ══
   const earthObj = planetObjects.find(p => p.data.name === 'Terre');
   if (earthObj) {
     moonAngle += (Math.PI * 2 / 27.32) * simDays;
@@ -906,7 +847,6 @@ function tick() {
     moonMesh.rotation.y += (Math.PI * 2 / 27.32) * simDays * ROT_FACTOR;
   }
 
-  // ══ Soleil ══
   sunMesh.rotation.y += (Math.PI * 2 / 25) * simDays * ROT_FACTOR;
   sunSurfaceMat.uniforms.time.value = elapsed;
 
@@ -919,7 +859,7 @@ function tick() {
       camera.position.copy(wp).addScaledVector(dir.normalize(), lockedDistance);
   }
 
-  // ══ Labels ══
+
   labels.forEach(({ el, mesh }) => {
     const dist  = camera.position.distanceTo(mesh.getWorldPosition(new THREE.Vector3()));
     const s     = new THREE.Box3().setFromObject(mesh).getSize(new THREE.Vector3());
