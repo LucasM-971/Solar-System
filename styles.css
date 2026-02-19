@@ -1,126 +1,136 @@
-@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600&display=swap');
 
 * {
-margin: 0;
-padding: 0;
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
 }
-html,
+
 body {
-overflow: hidden;
+    background: #07141c;
+    font-family: 'Orbitron', sans-serif;
+    overflow: hidden;
+    color: #00f5d4;
 }
-#webgl {
-position: absolute;
-top: 0;
-left: 0;
-outline: none;
+
+
+
+body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    background-image:
+        radial-gradient(rgba(0, 255, 255, 0.15) 1px, transparent 1px);
+    background-size: 25px 25px;
+    opacity: 0.2;
+    pointer-events: none;
 }
+
+
 
 #planet-info {
     position: fixed;
-    top: 30px;
-    right: 30px;
-    width: 350px;
-    padding: 30px;
-    background: rgba(10, 5, 25, 0.85);
-    border-radius: 20px;
-    border: 2px solid rgba(0, 255, 255, 0.6);
-    font-family: 'Orbitron', sans-serif;
-    color: #00ffe0;
-    box-shadow: 0 0 20px #00ffe0, 0 0 50px #ff00ff33 inset;
-    backdrop-filter: blur(20px);
+    top: 40px;
+    right: 40px;
+    width: 420px;
+    padding: 35px;
+
+    background: rgba(0, 20, 30, 0.85);
+    border: 1px solid rgba(0, 255, 255, 0.4);
+
+    backdrop-filter: blur(12px);
+
+    clip-path: polygon(10% 0%, 90% 0%, 100% 10%,
+            100% 90%, 90% 100%, 10% 100%,
+            0% 90%, 0% 10%);
+
+    box-shadow:
+        0 0 15px rgba(0, 255, 255, 0.6),
+        inset 0 0 30px rgba(0, 255, 255, 0.1);
+
     opacity: 0;
-    transform: translateX(120%);
-    pointer-events: none;
-    overflow: hidden;
-}
-
-#planet-info::before {
-    content: "";
-    position: absolute;
-    top: -50%;
-    left: -50%;
-    width: 200%;
-    height: 200%;
-    background: radial-gradient(circle, rgba(255, 0, 255, 0.15), transparent 70%);
-    animation: rotateBG 15s linear infinite;
-    z-index: 0;
-}
-
-@keyframes rotateBG {
-    0% {
-        transform: rotate(0deg);
-    }
-
-    100% {
-        transform: rotate(360deg);
-    }
+    transform: translateX(80px);
+    transition: all 0.5s ease;
 }
 
 #planet-info.visible {
     opacity: 1;
     transform: translateX(0);
-    transition: all 0.7s cubic-bezier(0.68, -0.55, 0.265, 1.55);
 }
+
+
 
 #planet-info h2 {
-    position: relative;
-    z-index: 1;
-    margin: 0 0 15px 0;
-    font-size: 28px;
-    border-bottom: 2px solid #ff00ff;
+    font-size: 22px;
+    letter-spacing: 2px;
+    margin-bottom: 20px;
+    border-bottom: 1px solid rgba(0, 255, 255, 0.4);
     padding-bottom: 12px;
-    text-shadow: 0 0 8px #ff00ff, 0 0 20px #ff00ff88;
 }
+
+
 
 #planet-info p {
-    position: relative;
-    z-index: 1;
-    margin: 10px 0;
-    font-size: 15px;
-    line-height: 1.5;
-    text-shadow: 0 0 5px #00ffe033, 0 0 15px #ff00ff22;
+    font-size: 13px;
+    line-height: 1.6;
+    margin-bottom: 12px;
+    color: rgba(0, 255, 255, 0.8);
 }
 
-#planet-info .label {
-    color: #ff00ff;
-    font-weight: 700;
+.label {
+    color: #00ffff;
+    font-weight: 600;
 }
 
-/* ligne horizontale animée style HUD */
-#planet-info .line {
+
+
+.radar {
+    position: absolute;
+    bottom: -120px;
+    left: -120px;
+    width: 260px;
+    height: 260px;
+    border-radius: 50%;
+    border: 2px solid rgba(0, 255, 255, 0.5);
+    box-shadow: 0 0 20px rgba(0, 255, 255, 0.5);
+}
+
+.radar::before {
+    content: "";
+    position: absolute;
+    inset: 20px;
+    border-radius: 50%;
+    border: 1px dashed rgba(0, 255, 255, 0.4);
+}
+
+.radar::after {
+    content: "";
     position: absolute;
     top: 50%;
-    left: -100%;
-    width: 200%;
-    height: 2px;
-    background: linear-gradient(90deg, transparent, #00ffe0, transparent);
-    z-index: 0;
-    animation: lineMove 3s linear infinite;
+    left: 50%;
+    width: 2px;
+    height: 120px;
+    background: linear-gradient(to top, transparent, #00ffff);
+    transform-origin: bottom center;
+    animation: sweep 4s linear infinite;
 }
 
-@keyframes lineMove {
+@keyframes sweep {
     0% {
-        transform: translateX(-100%);
+        transform: rotate(0deg) translateX(-50%);
     }
 
     100% {
-        transform: translateX(100%);
+        transform: rotate(360deg) translateX(-50%);
     }
 }
 
-@media screen and (max-width: 400px) {
-    #planet-info {
-        width: 90%;
-        right: 5%;
-        padding: 20px;
-    }
 
-    #planet-info h2 {
-        font-size: 22px;
-    }
-
-    #planet-info p {
-        font-size: 13px;
-    }
-    
+.tech-line {
+    position: absolute;
+    top: 50%;
+    left: -200px;
+    width: 200px;
+    height: 1px;
+    background: linear-gradient(to right, transparent, #00ffff);
 }
