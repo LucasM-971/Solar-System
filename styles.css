@@ -134,3 +134,98 @@ body::before {
     height: 1px;
     background: linear-gradient(to right, transparent, #00ffff);
 }
+
+
+@media (min-width: 1600px) {
+    #planet-info {
+        width: 480px;
+        padding: 45px;
+    }
+
+    #planet-info h2 {
+        font-size: 26px;
+    }
+
+    #planet-info p {
+        font-size: 15px;
+    }
+}
+
+
+
+@media (max-width: 1024px) {
+    #planet-info {
+        width: 340px;
+        padding: 25px;
+        top: 20px;
+        right: 20px;
+    }
+
+    .radar {
+        width: 200px;
+        height: 200px;
+        bottom: -90px;
+        left: -90px;
+    }
+}
+
+
+@media (max-width: 768px) {
+
+    body {
+        overflow: auto;
+    }
+
+    #planet-info {
+        width: 90%;
+        max-width: 380px;
+
+        left: 50%;
+        right: auto;
+        top: auto;
+        bottom: 30px;
+
+        transform: translate(-50%, 40px);
+        padding: 20px;
+    }
+
+    #planet-info.visible {
+        transform: translate(-50%, 0);
+    }
+
+    #planet-info h2 {
+        font-size: 18px;
+    }
+
+    #planet-info p {
+        font-size: 12px;
+    }
+
+    .radar {
+        display: none;
+
+    }
+
+    .tech-line {
+        display: none;
+    }
+}
+
+
+
+@media (max-width: 480px) {
+
+    #planet-info {
+        padding: 16px;
+        bottom: 15px;
+    }
+
+    #planet-info h2 {
+        font-size: 16px;
+        margin-bottom: 12px;
+    }
+
+    #planet-info p {
+        font-size: 11px;
+    }
+}
