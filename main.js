@@ -6,17 +6,24 @@ const scene = new THREE.Scene();
 const sizes = { width: window.innerWidth, height: window.innerHeight };
 const canvas = document.getElementById('webgl');
 
+const IS_TOUCH_DEVICE = window.matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0;
+const IS_LOW_MEMORY_DEVICE = typeof navigator.deviceMemory === 'number' && navigator.deviceMemory <= 4;
+
 const camera = new THREE.PerspectiveCamera(60, sizes.width / sizes.height, 0.01, 200000);
 camera.position.set(0, 160, 550);
 scene.add(camera);
 
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, logarithmicDepthBuffer: true });
+const renderer = new THREE.WebGLRenderer({
+  canvas,
+  antialias: !IS_TOUCH_DEVICE,
+  logarithmicDepthBuffer: !IS_TOUCH_DEVICE,
+  powerPreference: IS_TOUCH_DEVICE ? 'low-power' : 'high-performance',
+});
 renderer.setSize(sizes.width, sizes.height);
-// 8K quality: max pixel ratio
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 3));
+const LOW_QUALITY = IS_TOUCH_DEVICE || IS_LOW_MEMORY_DEVICE || renderer.capabilities.maxTextureSize <= 4096;
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, LOW_QUALITY ? 1.25 : 2));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-// Tone mapping pour les planètes (pas pour le Soleil/étoiles qui utilisent MeshBasicMaterial)
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.0;
 
@@ -28,7 +35,24 @@ controls.target.set(0, 0, 0);
 controls.update();
 
 const TL = new THREE.TextureLoader();
-const MAX_ANISOTROPY = renderer.capabilities.getMaxAnisotropy();
+const MAX_ANISOTROPY = LOW_QUALITY ? Math.min(2, renderer.capabilities.getMaxAnisotropy()) : renderer.capabilities.getMaxAnisotropy();
+
+function solidTexture(hex) {
+  const c = new THREE.Color(hex);
+  const data = new Uint8Array([
+    Math.round(c.r * 255),
+    Math.round(c.g * 255),
+    Math.round(c.b * 255),
+    255,
+  ]);
+  const t = new THREE.DataTexture(data, 1, 1, THREE.RGBAFormat);
+  t.needsUpdate = true;
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+const BLACK_TEX = solidTexture(0x000000);
+const SUN_FALLBACK_TEX = solidTexture(0xffa63a);
 
 function loadTex(path, srgb = false) {
   const t = TL.load(path);
@@ -37,75 +61,87 @@ function loadTex(path, srgb = false) {
   return t;
 }
 
-
-const earthDayTex    = loadTex('/texture/earth-texture.jpg',   true);
-const earthNightTex  = loadTex('/texture/8k_earth_nightmap.jpg', true);
-const earthCloudsTex = loadTex('/texture/8k_earth_clouds.jpg', false);
-earthCloudsTex.wrapS = THREE.RepeatWrapping;
-
-const earthBumpTex   = TL.load('/texture/8k_earth_normal_map.jpg');
-earthBumpTex.anisotropy = MAX_ANISOTROPY;
+const earthDayTex    = loadTex('/texture/earth-texture.jpg', true);
+const earthNightTex  = LOW_QUALITY ? BLACK_TEX : loadTex('/texture/8k_earth_nightmap.jpg', true);
+const earthCloudsTex = LOW_QUALITY ? null : loadTex('/texture/8k_earth_clouds.jpg', false);
+if (earthCloudsTex) earthCloudsTex.wrapS = THREE.RepeatWrapping;
 
 const tex = {
-  mercure : loadTex('/texture/8k_mercury.jpg',   true),
+  mercure : LOW_QUALITY ? null : loadTex('/texture/8k_mercury.jpg', true),
   venus   : loadTex('/texture/4k_venus_atmosphere.jpg', true),
-  mars    : loadTex('/texture/8k_mars.jpg',      true),
-  jupiter : loadTex('/texture/8k_jupiter.jpg',   true),
+  mars    : LOW_QUALITY ? null : loadTex('/texture/8k_mars.jpg', true),
+  jupiter : LOW_QUALITY ? null : loadTex('/texture/8k_jupiter.jpg', true),
   saturn  : loadTex('/texture/saturn.jpg',       true),
   ring    : loadTex('/texture/saturn-ring.png',  false),
   uranus  : loadTex('/texture/2k_uranus.jpg',    true),
   neptune : loadTex('/texture/2k_neptune.jpg',   true),
-  sun     : loadTex('/texture/8k_sun.jpg',       true),
-  moon    : loadTex('/texture/8k_moon.jpg',      true),
-  stars   : loadTex('/texture/8k_stars.jpg',     true),
+  sun     : LOW_QUALITY ? SUN_FALLBACK_TEX : loadTex('/texture/8k_sun.jpg', true),
+  moon    : LOW_QUALITY ? null : loadTex('/texture/8k_moon.jpg', true),
+  stars   : LOW_QUALITY ? null : loadTex('/texture/8k_stars.jpg', true),
 };
 
-scene.add(new THREE.Mesh(
-  new THREE.SphereGeometry(90000, 64, 64),
-  new THREE.MeshBasicMaterial({ map: tex.stars, side: THREE.BackSide })
-));
+if (tex.stars) {
+  scene.add(new THREE.Mesh(
+    new THREE.SphereGeometry(90000, LOW_QUALITY ? 24 : 64, LOW_QUALITY ? 24 : 64),
+    new THREE.MeshBasicMaterial({ map: tex.stars, side: THREE.BackSide })
+  ));
+}
 
-
+// ─────────────────────────────────────────────────────────────
+// FIX #1 — Earth ShaderMaterial
+// Problème : vNormalWorld utilisait normalMatrix (view space) mais
+// sunDir est en world space → dot product incohérent → éclairage faux.
+// Fix : on calcule la normale en world space via modelMatrix directement,
+// ET on expose le sunDir en world space depuis le JS.
+// ─────────────────────────────────────────────────────────────
 const earthMat = new THREE.ShaderMaterial({
   uniforms: {
     dayMap   : { value: earthDayTex   },
     nightMap : { value: earthNightTex },
+    // sunDir est maintenant en WORLD space (mis à jour chaque frame ci-dessous)
     sunDir   : { value: new THREE.Vector3(1, 0, 0) },
   },
   vertexShader: `
     varying vec2 vUv;
     varying vec3 vNormalWorld;
     void main() {
-      vUv         = uv;
-      // Normale en WORLD space (même espace que sunDir)
-      vNormalWorld = normalize(vec3(modelMatrix * vec4(normal, 0.0)));
-      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      vUv = uv;
+      // Normale en world space : on utilise modelMatrix (pas normalMatrix qui est en view)
+      vNormalWorld = normalize(mat3(modelMatrix) * normal);
+      gl_Position  = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
     }
   `,
   fragmentShader: `
     uniform sampler2D dayMap;
     uniform sampler2D nightMap;
-    uniform vec3 sunDir;
-    varying vec2 vUv;
-    varying vec3 vNormalWorld;
+    uniform vec3      sunDir;      // world space, normalisé côté JS
+    varying vec2  vUv;
+    varying vec3  vNormalWorld;
+
     void main() {
-      // sunDir et vNormalWorld sont tous les deux en world space → dot correct
-      float diff  = dot(normalize(vNormalWorld), normalize(sunDir));
-      float blend = smoothstep(-0.2, 0.2, diff);
+      float diff  = dot(vNormalWorld, sunDir);          // tous deux en world space ✓
+      float blend = smoothstep(-0.15, 0.25, diff);
+
       vec3 day    = texture2D(dayMap,   vUv).rgb;
       vec3 night  = texture2D(nightMap, vUv).rgb;
-      gl_FragColor = vec4(mix(night, day, blend), 1.0);
+
+      // Légère lueur atmosphérique sur le terminator
+      float atmo  = smoothstep(-0.4, 0.1, diff) * (1.0 - smoothstep(0.0, 0.4, diff));
+      vec3 rim    = vec3(0.15, 0.35, 0.9) * atmo * 0.55;
+
+      vec3 col    = mix(night, day, blend) + rim;
+      gl_FragColor = vec4(col, 1.0);
     }
   `,
 });
 
-const cloudMat = new THREE.MeshStandardMaterial({
+const cloudMat = earthCloudsTex ? new THREE.MeshStandardMaterial({
   map:         earthCloudsTex,
   transparent: true,
   opacity:     0.4,
   depthWrite:  false,
   roughness:   1.0,
-});
+}) : null;
 
 const atmMat = new THREE.MeshStandardMaterial({
   color:       0x1166ff,
@@ -145,9 +181,7 @@ const PLANETS_DATA = [
   { name:'Neptune', sma:30.07,  ecc:0.0097, period:164.798, rKm:24622, color:0x5c6bc0, texKey:'neptune', tilt:28.3,  M0:256.228, rotPeriod: 0.6713  },
 ];
 
-
-const SUN_R = 15; 
-
+const SUN_R = 15;
 
 const sunSurfaceMat = new THREE.ShaderMaterial({
   uniforms: {
@@ -169,24 +203,21 @@ const sunSurfaceMat = new THREE.ShaderMaterial({
     varying vec2  vUv;
     varying vec3  vNormal;
 
-    // Hash pseudo-aléatoire
     float hash(vec2 p) {
       p = fract(p * vec2(127.1, 311.7));
       p += dot(p, p + 17.5);
       return fract(p.x * p.y);
     }
-    // Bruit lisse 2D
     float noise(vec2 p) {
       vec2 i = floor(p);
       vec2 f = fract(p);
-      f = f * f * (3.0 - 2.0 * f);  // smoothstep
+      f = f * f * (3.0 - 2.0 * f);
       return mix(
         mix(hash(i),           hash(i + vec2(1,0)), f.x),
         mix(hash(i + vec2(0,1)), hash(i + vec2(1,1)), f.x),
         f.y
       );
     }
-    // fBm (fractal Brownian motion) — simule la granulation solaire
     float fbm(vec2 p) {
       float v = 0.0, a = 0.5;
       for (int i = 0; i < 5; i++) {
@@ -198,29 +229,17 @@ const sunSurfaceMat = new THREE.ShaderMaterial({
     }
 
     void main() {
-      // Texture de base
       vec3 texCol = texture2D(sunTex, vUv).rgb;
-
-      // Granulation procédurale (convection cells) animée lentement
       float gran = fbm(vUv * 18.0 + vec2(time * 0.012, time * 0.008));
-      // Mélange subtil : amplifie les zones brillantes
-      vec3 hot  = vec3(1.0,  0.82, 0.30);  // blanc-jaune chaud
-      vec3 cool = vec3(0.85, 0.35, 0.05);  // orange foncé
+      vec3 hot  = vec3(1.0,  0.82, 0.30);
+      vec3 cool = vec3(0.85, 0.35, 0.05);
       vec3 granCol = mix(cool, hot, gran);
-
-      // La texture drive la forme globale, la granulation ajoute du détail
       vec3 surface = texCol * (0.72 + gran * 0.28);
       surface = mix(surface, granCol, 0.18);
-
-      // Limb darkening : le bord du disque solaire est plus sombre (physique)
-      // vNormal.z ~ cos(angle d'incidence vue) en espace vue
       float limb = max(0.0, vNormal.z);
-      float ld   = 1.0 - 0.55 * (1.0 - limb);   // coeff observationnel ~0.5-0.6
+      float ld   = 1.0 - 0.55 * (1.0 - limb);
       surface *= ld;
-
-      // Sur-exposition légère pour l'incandescence
       surface *= 1.25;
-
       gl_FragColor = vec4(surface, 1.0);
     }
   `,
@@ -228,12 +247,11 @@ const sunSurfaceMat = new THREE.ShaderMaterial({
 });
 
 const sunMesh = new THREE.Mesh(
-  new THREE.SphereGeometry(SUN_R, 128, 128),
+  new THREE.SphereGeometry(SUN_R, LOW_QUALITY ? 48 : 128, LOW_QUALITY ? 48 : 128),
   sunSurfaceMat
 );
 sunMesh.name = 'soleil';
 scene.add(sunMesh);
-
 
 function makeCoronaCanvas(size, innerColor, outerColor) {
   const c = document.createElement('canvas');
@@ -263,7 +281,6 @@ const coronaSprite = new THREE.Sprite(coronaMat);
 coronaSprite.scale.set(SUN_R * 3.2, SUN_R * 3.2, 1);
 scene.add(coronaSprite);
 
-
 const haloTex = makeCoronaCanvas(512, 'rgba(255,160,30,0.25)', 'rgba(255,80,0,0)');
 const haloMat = new THREE.SpriteMaterial({
   map:        haloTex,
@@ -277,11 +294,9 @@ const haloSprite = new THREE.Sprite(haloMat);
 haloSprite.scale.set(SUN_R * 9.0, SUN_R * 9.0, 1);
 scene.add(haloSprite);
 
-
-
 const sunLight = new THREE.PointLight(0xfff4e0, 2500, 0, 1);
-sunLight.castShadow = true;
-sunLight.shadow.mapSize.set(4096, 4096);
+sunLight.castShadow = !LOW_QUALITY;
+sunLight.shadow.mapSize.set(LOW_QUALITY ? 512 : 2048, LOW_QUALITY ? 512 : 2048);
 sunLight.shadow.camera.near   = 1;
 sunLight.shadow.camera.far    = 100000;
 sunLight.shadow.bias          = -0.0003;
@@ -300,7 +315,7 @@ function hexToRGB(hex) {
 }
 function hexToCSS(hex) { return '#' + hex.toString(16).padStart(6, '0'); }
 
-function buildEllipse(a, e, N = 512) {
+function buildEllipse(a, e, N = LOW_QUALITY ? 192 : 512) {
   const pts = [];
   for (let i = 0; i <= N; i++) {
     const θ = (i / N) * Math.PI * 2;
@@ -367,7 +382,7 @@ PLANETS_DATA.forEach(pd => {
 
   const { r: cr, g: cg, b: cb } = hexToRGB(pd.color);
   const headMesh = new THREE.Mesh(
-    new THREE.SphereGeometry(r * 0.1, 12, 12),
+    new THREE.SphereGeometry(r * 0.1, LOW_QUALITY ? 8 : 12, LOW_QUALITY ? 8 : 12),
     new THREE.MeshBasicMaterial({
       color: pd.color, transparent: true, opacity: 0,
       blending: THREE.AdditiveBlending, depthWrite: false,
@@ -381,7 +396,6 @@ PLANETS_DATA.forEach(pd => {
   const posGroup = new THREE.Group();
   orbitPivot.add(posGroup);
 
-  // ── MATÉRIAU ──
   let mat;
   if (pd.name === 'Terre') {
     mat = earthMat;
@@ -393,9 +407,8 @@ PLANETS_DATA.forEach(pd => {
     });
   }
 
-  const geoSegments = pd.name === 'Terre' ? 128 : 64;
+  const geoSegments = pd.name === 'Terre' ? (LOW_QUALITY ? 48 : 128) : (LOW_QUALITY ? 32 : 64);
   const mesh = new THREE.Mesh(new THREE.SphereGeometry(r, geoSegments, geoSegments), mat);
-
 
   if (pd.name === 'Terre') {
     mesh.castShadow    = false;
@@ -411,19 +424,19 @@ PLANETS_DATA.forEach(pd => {
 
   let earthCloudMesh = null;
   if (pd.name === 'Terre') {
-    // MESH B : nuages (r * 1.007 = légèrement au-dessus)
-    earthCloudMesh = new THREE.Mesh(
-      new THREE.SphereGeometry(r * 1.007, 128, 128),
-      cloudMat
-    );
-    earthCloudMesh.castShadow    = false;
-    earthCloudMesh.receiveShadow = false;
-    earthCloudMesh.rotation.z   = THREE.MathUtils.degToRad(pd.tilt);
-    posGroup.add(earthCloudMesh);
+    if (cloudMat) {
+      earthCloudMesh = new THREE.Mesh(
+        new THREE.SphereGeometry(r * 1.007, LOW_QUALITY ? 32 : 128, LOW_QUALITY ? 32 : 128),
+        cloudMat
+      );
+      earthCloudMesh.castShadow    = false;
+      earthCloudMesh.receiveShadow = false;
+      earthCloudMesh.rotation.z   = THREE.MathUtils.degToRad(pd.tilt);
+      posGroup.add(earthCloudMesh);
+    }
 
-    // MESH C : atmosphère backlit (r * 1.025)
     const atmMesh = new THREE.Mesh(
-      new THREE.SphereGeometry(r * 1.025, 64, 64),
+      new THREE.SphereGeometry(r * 1.025, LOW_QUALITY ? 24 : 64, LOW_QUALITY ? 24 : 64),
       atmMat
     );
     atmMesh.castShadow    = false;
@@ -431,11 +444,10 @@ PLANETS_DATA.forEach(pd => {
     posGroup.add(atmMesh);
   }
 
-  // ── Anneaux de Saturne ──
   if (pd.ring) {
     const innerR  = r * 1.2;
     const outerR  = r * 2.3;
-    const ringGeo = new THREE.RingGeometry(innerR, outerR, 128);
+    const ringGeo = new THREE.RingGeometry(innerR, outerR, LOW_QUALITY ? 64 : 128);
     const rpos = ringGeo.attributes.position;
     const ruv  = ringGeo.attributes.uv;
     for (let i = 0; i < rpos.count; i++) {
@@ -484,10 +496,9 @@ PLANETS_DATA.forEach(pd => {
   });
 });
 
-
 const moonR    = scaleRadius(1737);
 const moonMesh = new THREE.Mesh(
-  new THREE.SphereGeometry(moonR, 64, 64),
+  new THREE.SphereGeometry(moonR, LOW_QUALITY ? 24 : 64, LOW_QUALITY ? 24 : 64),
   new THREE.MeshStandardMaterial({
     map:       tex.moon,
     roughness: 1.0,
@@ -502,7 +513,13 @@ scene.add(moonMesh);
 let moonAngle = initialAngle(134.963, 27.32);
 const MOON_DIST = scaleRadius(6371) * 8;
 
-
+// ─────────────────────────────────────────────────────────────
+// FIX #2 — Labels overlay
+// - Ne plus cacher les labels quand un focus est actif
+// - Faire disparaître subtilement TOUS les labels sauf celui de
+//   la planète focalisée (fade out via opacity CSS)
+// - Corriger le calcul de position Y pour suivre précisément les meshes
+// ─────────────────────────────────────────────────────────────
 const style = document.createElement('style');
 style.textContent = `
   @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&display=swap');
@@ -520,6 +537,7 @@ style.textContent = `
     padding: 3px 9px;
     border-radius: 3px;
     white-space: nowrap;
+    /* translateX(-50%) centre le label sur l'axe X du point projeté */
     transform: translateX(-50%) scale(1);
     transform-origin: center bottom;
     cursor: pointer;
@@ -530,9 +548,10 @@ style.textContent = `
       border-color 0.25s ease,
       background   0.25s ease,
       color        0.2s  ease,
-      opacity      0.3s  ease;
+      opacity      0.4s  ease;
   }
-  .planet-label.hidden { opacity: 0 !important; pointer-events: none !important; }
+  .planet-label.hidden  { opacity: 0 !important; pointer-events: none !important; }
+  .planet-label.faded   { opacity: 0.12 !important; pointer-events: none !important; }
   .planet-label:hover {
     transform: translateX(-50%) scale(1.4) !important;
     animation: neonPulse 1.5s ease-in-out infinite;
@@ -583,30 +602,64 @@ function createLabel(displayName, colorHex, planetObj) {
 }
 
 const labels = planetObjects.map(obj => ({
-  el: createLabel(obj.data.name, obj.data.color, obj),
+  el:   createLabel(obj.data.name, obj.data.color, obj),
   mesh: obj.mesh,
   pObj: obj,
 }));
-const moonLabel = createLabel('Lune',   0xcccccc, null);
-const sunLabel  = createLabel('Soleil', 0xffee88, null);
+const moonLabel = { el: createLabel('Lune',   0xcccccc, null), mesh: moonMesh };
+const sunLabel  = { el: createLabel('Soleil', 0xffee88, null), mesh: sunMesh  };
 
+const allLabels = [
+  ...labels,
+  moonLabel,
+  sunLabel,
+];
 
+// ─────────────────────────────────────────────────────────────
+// FIX #3 — projectToScreen + updateLabel robustes
+// On projette la position world du mesh et on décale Y vers le haut
+// d'un offset en pixels (approximation simple mais stable).
+// ─────────────────────────────────────────────────────────────
 const _projVec = new THREE.Vector3();
+
 function projectToScreen(mesh) {
   mesh.getWorldPosition(_projVec);
   _projVec.project(camera);
   return {
-    x: (_projVec.x * 0.5 + 0.5) * sizes.width,
+    x: (_projVec.x *  0.5 + 0.5) * sizes.width,
     y: (-_projVec.y * 0.5 + 0.5) * sizes.height,
     z: _projVec.z,
   };
 }
-function updateLabel(el, mesh, vOffset = 0) {
+
+function updateLabel(el, mesh, pxOffset = 20) {
   const { x, y, z } = projectToScreen(mesh);
-  if (z > 1) { el.classList.add('hidden'); return; }
+
+  // Derrière la caméra → caché
+  if (z > 1) {
+    el.classList.add('hidden');
+    return;
+  }
   el.classList.remove('hidden');
-  el.style.left = x + 'px';
-  el.style.top  = (y - vOffset) + 'px';
+
+  // Centrage horizontal géré par translateX(-50%) en CSS
+  el.style.left = `${x}px`;
+  el.style.top  = `${y - pxOffset}px`;
+}
+
+// Met à jour la visibilité (faded/normal) selon l'état focus
+function refreshLabelFocus() {
+  allLabels.forEach(({ el, mesh }) => {
+    if (!focusedMesh) {
+      el.classList.remove('faded');
+    } else {
+      if (mesh === focusedMesh) {
+        el.classList.remove('faded');
+      } else {
+        el.classList.add('faded');
+      }
+    }
+  });
 }
 
 const planetData = {
@@ -633,7 +686,6 @@ function showInfo(key) {
   document.getElementById('planet-info').classList.add('visible');
 }
 function hideInfo() { document.getElementById('planet-info').classList.remove('visible'); }
-
 
 const backBtn = document.createElement('button');
 backBtn.textContent = '← Retour';
@@ -667,7 +719,15 @@ function hideBackBtn() {
   backBtn.style.opacity = '0'; backBtn.style.pointerEvents = 'none'; backBtn.style.transform = 'translateY(-6px)';
 }
 
-
+// ─────────────────────────────────────────────────────────────
+// FIX #4 — Animation de focus
+// Problème original : la cible de l'animation est calculée UNE SEULE
+// FOIS au moment du clic, mais la planète continue à se déplacer
+// → camera arrive au mauvais endroit puis "saute".
+// Fix : pendant l'animation d'approche, on ré-échantillonne la
+// position world de la planète à chaque frame pour ajuster dst et
+// controls.target dynamiquement.
+// ─────────────────────────────────────────────────────────────
 let focusedMesh    = null;
 let isAnimating    = false;
 let lockedDistance = 0;
@@ -688,20 +748,33 @@ function focusOnPlanet(mesh) {
   else if (mesh === moonMesh) vizR = moonR;
   lockedDistance = Math.max(vizR * 3.5, 5);
 
-  const wp  = new THREE.Vector3(); mesh.getWorldPosition(wp);
-  const dir = camera.position.clone().sub(wp).normalize();
-  const dst = wp.clone().addScaledVector(dir, lockedDistance);
-
-  const sp = camera.position.clone(), st = controls.target.clone(), t0 = Date.now();
+  const sp = camera.position.clone();
+  const st = controls.target.clone();
+  const t0 = Date.now();
   controls.enabled = false;
 
+  // Met à jour les labels en mode focus (fader tous sauf la cible)
+  refreshLabelFocus();
+
   (function animIn() {
-    const p = Math.min((Date.now() - t0) / 1400, 1);
-    const ease = p < .5 ? 2*p*p : 1 - Math.pow(-2*p+2,2)/2;
+    const p    = Math.min((Date.now() - t0) / 1400, 1);
+    const ease = p < .5 ? 2*p*p : 1 - Math.pow(-2*p+2, 2)/2;
+
+    // On récupère la position COURANTE du mesh (la planète se déplace)
+    const wp  = new THREE.Vector3();
+    mesh.getWorldPosition(wp);
+
+    // Direction caméra → planète, recalculée chaque frame
+    const dir = camera.position.clone().sub(wp).normalize();
+    const dst = wp.clone().addScaledVector(dir, lockedDistance);
+
     camera.position.lerpVectors(sp, dst, ease);
     controls.target.lerpVectors(st, wp, ease);
     controls.update();
+
     if (p < 1) { requestAnimationFrame(animIn); return; }
+
+    // Fin de l'anim
     controls.enabled    = true;
     controls.enableZoom = false;
     controls.enablePan  = false;
@@ -713,18 +786,22 @@ function focusOnPlanet(mesh) {
 
 function resetView() {
   if (isAnimating) return;
-  focusedMesh = null; isAnimating = true;
-  hideInfo(); hideBackBtn();
+  focusedMesh = null;
+  isAnimating = true;
+  hideInfo();
+  hideBackBtn();
   controls.enableZoom = true;
   controls.enablePan  = true;
   controls.enabled    = false;
+
+  refreshLabelFocus(); // retire tous les .faded
 
   const sp = camera.position.clone(), st = controls.target.clone(), t0 = Date.now();
   const tp = new THREE.Vector3(0, 160, 550), tt = new THREE.Vector3();
 
   (function animOut() {
-    const p = Math.min((Date.now() - t0) / 1400, 1);
-    const ease = p < .5 ? 2*p*p : 1 - Math.pow(-2*p+2,2)/2;
+    const p    = Math.min((Date.now() - t0) / 1400, 1);
+    const ease = p < .5 ? 2*p*p : 1 - Math.pow(-2*p+2, 2)/2;
     camera.position.lerpVectors(sp, tp, ease);
     controls.target.lerpVectors(st, tt, ease);
     controls.update();
@@ -752,8 +829,8 @@ window.addEventListener('resize', () => {
   camera.aspect = sizes.width / sizes.height;
   camera.updateProjectionMatrix();
   renderer.setSize(sizes.width, sizes.height);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, LOW_QUALITY ? 1.25 : 2));
 });
-
 
 const SIM_DAYS_PER_SEC    = 0.5;
 const EARTH_PERIOD_DAYS   = 365.25;
@@ -763,6 +840,9 @@ const ROT_FACTOR          = 0.02;
 
 let lastTime = performance.now();
 let elapsed  = 0;
+
+// vecteur réutilisable pour éviter les allocations dans tick()
+const _wpTmp = new THREE.Vector3();
 
 function tick() {
   const now_ms = performance.now();
@@ -785,11 +865,15 @@ function tick() {
     obj.rotAngle  += data.rotPeriod < 0 ? -rotSpeed : rotSpeed;
     obj.mesh.rotation.set(0, obj.rotAngle, THREE.MathUtils.degToRad(data.tilt));
 
-    // Mise à jour sunDir + rotation nuages
+    // ─ Terre : mise à jour sunDir en world space ─
     if (data.name === 'Terre') {
-      const earthWP = new THREE.Vector3();
-      obj.mesh.getWorldPosition(earthWP);
-      earthMat.uniforms.sunDir.value.copy(earthWP.clone().negate().normalize());
+      obj.mesh.getWorldPosition(_wpTmp);
+      // Le soleil est en (0,0,0) → direction vers la Terre = position normalisée
+      // sunDir = direction du soleil VU depuis la Terre → negate
+      earthMat.uniforms.sunDir.value
+        .copy(_wpTmp)
+        .negate()
+        .normalize();
 
       if (obj.earthCloudMesh) {
         obj.earthCloudMesh.rotation.set(0, obj.rotAngle * 1.015, THREE.MathUtils.degToRad(data.tilt));
@@ -810,7 +894,6 @@ function tick() {
       cg + (1 - cg) * ht * 0.6,
       cb + (1 - cb) * ht * 0.6
     );
-
 
     obj.trailT = (obj.trailT + TRAIL_SPEED_PER_SEC * dt) % 1;
     obj.trailLine.material.opacity = ht;
@@ -835,14 +918,15 @@ function tick() {
     }
   });
 
+  // ══ Lune ══
   const earthObj = planetObjects.find(p => p.data.name === 'Terre');
   if (earthObj) {
     moonAngle += (Math.PI * 2 / 27.32) * simDays;
-    const ep = new THREE.Vector3(); earthObj.mesh.getWorldPosition(ep);
+    earthObj.mesh.getWorldPosition(_wpTmp);
     moonMesh.position.set(
-      ep.x + MOON_DIST * Math.cos(moonAngle),
-      ep.y,
-      ep.z + MOON_DIST * Math.sin(moonAngle)
+      _wpTmp.x + MOON_DIST * Math.cos(moonAngle),
+      _wpTmp.y,
+      _wpTmp.z + MOON_DIST * Math.sin(moonAngle)
     );
     moonMesh.rotation.y += (Math.PI * 2 / 27.32) * simDays * ROT_FACTOR;
   }
@@ -850,24 +934,45 @@ function tick() {
   sunMesh.rotation.y += (Math.PI * 2 / 25) * simDays * ROT_FACTOR;
   sunSurfaceMat.uniforms.time.value = elapsed;
 
-  // ══ Suivi planète focalisée ══
+  // ══ Suivi planète focalisée (hors anim) ══
   if (focusedMesh && !isAnimating) {
-    const wp = new THREE.Vector3(); focusedMesh.getWorldPosition(wp);
-    controls.target.copy(wp);
-    const dir = camera.position.clone().sub(wp);
-    if (Math.abs(dir.length() - lockedDistance) > 0.01)
-      camera.position.copy(wp).addScaledVector(dir.normalize(), lockedDistance);
+    focusedMesh.getWorldPosition(_wpTmp);
+    controls.target.copy(_wpTmp);
+
+    // Maintient la distance lockedDistance
+    const dir = camera.position.clone().sub(_wpTmp);
+    const len = dir.length();
+    if (Math.abs(len - lockedDistance) > 0.01) {
+      camera.position.copy(_wpTmp).addScaledVector(dir.divideScalar(len), lockedDistance);
+    }
   }
 
-
-  labels.forEach(({ el, mesh }) => {
-    const dist  = camera.position.distanceTo(mesh.getWorldPosition(new THREE.Vector3()));
-    const s     = new THREE.Box3().setFromObject(mesh).getSize(new THREE.Vector3());
-    const scrH  = s.y * sizes.height / (2 * Math.tan(THREE.MathUtils.degToRad(30)) * dist);
-    updateLabel(el, mesh, scrH + 16);
+  // ══ Labels : mise à jour position écran chaque frame ══
+  // On utilise une estimation de l'offset vertical en pixels
+  // basée sur la taille apparente du mesh (évite les sauts).
+  labels.forEach(({ el, mesh, pObj }) => {
+    const dist = camera.position.distanceTo(mesh.getWorldPosition(_wpTmp));
+    // Rayon apparent en pixels
+    const fovRad  = THREE.MathUtils.degToRad(60);
+    const pixelR  = ((pObj ? pObj.r : SUN_R) / dist) * sizes.height / (2 * Math.tan(fovRad / 2));
+    updateLabel(el, mesh, pixelR + 14);
   });
-  updateLabel(moonLabel, moonMesh, 16);
-  updateLabel(sunLabel,  sunMesh,  80);
+
+  // Lune
+  {
+    const dist   = camera.position.distanceTo(moonMesh.getWorldPosition(_wpTmp));
+    const fovRad = THREE.MathUtils.degToRad(60);
+    const pixelR = (moonR / dist) * sizes.height / (2 * Math.tan(fovRad / 2));
+    updateLabel(moonLabel.el, moonMesh, pixelR + 14);
+  }
+
+  // Soleil
+  {
+    const dist   = camera.position.distanceTo(sunMesh.getWorldPosition(_wpTmp));
+    const fovRad = THREE.MathUtils.degToRad(60);
+    const pixelR = (SUN_R / dist) * sizes.height / (2 * Math.tan(fovRad / 2));
+    updateLabel(sunLabel.el, sunMesh, pixelR + 14);
+  }
 
   controls.update();
   renderer.render(scene, camera);
